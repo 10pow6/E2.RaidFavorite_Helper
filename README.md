@@ -1,7 +1,7 @@
 Open access for all.
 
 # What is this:
-This script runs through your properties with droids and then favorites all properties in range that have 0 civs/0 droids attached to them. It skips properties that are already favorited.
+This script runs through your properties with droids and then favorites all properties in range that have 0 civs/0 droids, have remaining EDC and have 0 claimed E-ther attached to them. It then saves the properties with new favorites to a .txt file and creates a progress.txt file where the number of properties processed thus far, is kept there for future use incase the script stops by mistake. It skips properties that are already favorited.
 
 # Why is this useful:
 Quality of life improvement for initial raid target list.
