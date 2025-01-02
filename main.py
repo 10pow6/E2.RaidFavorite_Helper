@@ -549,6 +549,8 @@ class APIClient:
             print(f"\t<< Performing bulk upsert for {len(self.favorite_landfields)} landfields >>")
             await self.bulk_upsert_favorites()
             self.favorite_landfields = []  # Clear the list after upserting
+        else:
+            print(f"\t<< Skipping bulk upsert for {property_id} | {property_description} as favorite candidates were found >>")
 
     async def run(self):
         """
