@@ -536,8 +536,8 @@ class APIClient:
                     #bulk upsert deprecates need to toggle props
                     #favorite_payload = await self.toggle_favorite(at_landfield_id)
                     print(f"\t\t|| Favorite Added >> {at_landfield_id} | {at_landfield_description}")
-                    #self.favorite_landfields.append(at_landfield_id)
-                    await self.wait_helper(level=2)
+                    self.favorite_landfields.append(at_landfield_id)
+                    #await self.wait_helper(level=2)
 
             if i + 1 <= total_at_pages:
                 print(f"\t++ A.T. Page Flip to Page {i + 1} ++")
