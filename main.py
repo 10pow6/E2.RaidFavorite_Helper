@@ -83,36 +83,11 @@ class APIConfig:
     wait_randomness_max: float
 
 class APIClient:
-    """
-    Client for making rate-limited API requests with automatic retries and backoff.
-
-    This client implements sophisticated rate limiting and error handling strategies for
-    reliable API interaction. It manages:
-    - Request rate limiting based on API call count
-    - Automatic retries with exponential backoff
-    - Request session management
-    - Error handling and recovery
-
-    The client uses a tiered wait time strategy where wait periods increase based on
-    the number of API calls made. This helps prevent rate limit issues while
-    maintaining reasonable throughput.
-
-    Example:
-        config = APIConfig(...)
-        client = APIClient(config)
-        await client.run()  # Starts the main processing loop
-
-    Rate Limiting Details:
-        - Wait times are calculated based on API call count thresholds
-        - Random jitter is added to prevent request synchronization
-        - Additional backoff is applied after failed requests
-        - Connection pooling is used for efficient HTTP connections
-    """
-    
     def __init__(self, config: APIConfig):
         self.config = config
         self.api_call_counter = 0
         self.land_page = -1
+        self.favorite_landfields = []  # Store landfield IDs for bulk upsert
         self.headers = {
             "accept": "application/json, text/plain, */*",
             "accept-language": "en-US,en;q=0.9",
@@ -130,6 +105,64 @@ class APIClient:
             "Referer": config.referer,
             "Referrer-Policy": "strict-origin-when-cross-origin"
         }
+
+    async def bulk_upsert_favorites(self) -> dict:
+        """Bulk upsert favorite landfields."""
+        if not self.favorite_landfields:
+            print("No landfields to upsert")
+            return {}
+
+        self.api_call_counter += 1
+        
+        async def call_api(client):
+            # Deduplicate landfield IDs
+            unique_landfields = list(set(self.favorite_landfields))
+            
+            payload = {
+                "user_favorite_landfields": [
+                    {
+                        "color": "white",
+                        "landfield_id": landfield_id
+                    }
+                    for landfield_id in unique_landfields
+                ]
+            }
+            
+            print(f"\n>>> Making PUT request for bulk upsert of {len(unique_landfields)} landfields")
+            response = await client.put(
+                "/user_favorite_landfields/bulk_upsert",
+                headers=self.headers,
+                json=payload
+            )
+            
+            raw_content = await response.aread()
+            status = response.status_code
+            headers = dict(response.headers)
+            
+            print(">>> BEGIN BULK UPSERT RESPONSE DATA <<<")
+            print(f"Status Code: {status}")
+            print(f"Raw Content Length: {len(raw_content)}")
+            try:
+                text_content = raw_content.decode('utf-8', errors='replace')
+            except Exception as e:
+                print(f"Failed to decode content: {e}")
+            print(">>> END BULK UPSERT RESPONSE DATA <<<")
+            
+            return {
+                'status': status,
+                'headers': headers,
+                'content': raw_content
+            }
+        
+        try:
+            response_data = await self.api_call_with_backoff(call_api)
+            if not response_data['content']:
+                print("Warning: Empty bulk upsert response content")
+                return {}
+            return json.loads(response_data['content'])
+        except Exception as e:
+            print(f"Error in bulk_upsert_favorites: {type(e).__name__}: {str(e)}")
+            raise
 
     def calculate_wait_time(self, api_calls: int) -> float:
         """
@@ -345,7 +378,7 @@ class APIClient:
             #print(f"Raw Content: {raw_content!r}")
             try:
                 text_content = raw_content.decode('utf-8', errors='replace')
-                print(f"Decoded Content: {text_content!r}")
+                #print(f"Decoded Content: {text_content!r}")
             except Exception as e:
                 print(f"Failed to decode content: {e}")
             print(">>> END LANDFIELD RESPONSE DATA <<<")
@@ -377,6 +410,8 @@ class APIClient:
                 f"&q=&recents=false&sortBy=tilesCount&sortDir=desc&{droids_url_str}",
                 headers=self.headers
             )
+
+            
             # Get raw data before any processing
             raw_content = await response.aread()
             status = response.status_code
@@ -384,12 +419,12 @@ class APIClient:
             
             print(">>> BEGIN ATTACK TARGETS RESPONSE DATA <<<")
             print(f"Status Code: {status}")
-            print(f"Headers: {headers}")
+            #print(f"Headers: {headers}")
             print(f"Raw Content Length: {len(raw_content)}")
-            print(f"Raw Content: {raw_content!r}")
+            #print(f"Raw Content: {raw_content!r}")
             try:
                 text_content = raw_content.decode('utf-8', errors='replace')
-                print(f"Decoded Content: {text_content!r}")
+                #print(f"Decoded Content: {text_content!r}")
             except Exception as e:
                 print(f"Failed to decode content: {e}")
             print(">>> END ATTACK TARGETS RESPONSE DATA <<<")
@@ -427,12 +462,12 @@ class APIClient:
             
             print(">>> BEGIN TOGGLE FAVORITE RESPONSE DATA <<<")
             print(f"Status Code: {status}")
-            print(f"Headers: {headers}")
+            #print(f"Headers: {headers}")
             print(f"Raw Content Length: {len(raw_content)}")
-            print(f"Raw Content: {raw_content!r}")
+            #print(f"Raw Content: {raw_content!r}")
             try:
                 text_content = raw_content.decode('utf-8', errors='replace')
-                print(f"Decoded Content: {text_content!r}")
+                #print(f"Decoded Content: {text_content!r}")
             except Exception as e:
                 print(f"Failed to decode content: {e}")
             print(">>> END TOGGLE FAVORITE RESPONSE DATA <<<")
@@ -456,8 +491,9 @@ class APIClient:
 
     async def process_property(self, property: dict) -> None:
         property_id = property["id"]
-        print(f"<< Processing {property_id} >>")
-        
+        property_description = property["attributes"]["description"]
+        print(f"<< Processing {property_id} | {property_description}>>")
+
         droid_ids = property['meta']['droidIds']
         if not droid_ids:
             print("\t<< No droids >>")
@@ -471,7 +507,7 @@ class APIClient:
         total_at_pages = payload["meta"]["pages"]
 
         for i in range(1, total_at_pages + 1):
-            for target in payload['data']:
+            for target in payload['data']:       
                 target_meta = target['meta']
                 target_attrs = target["attributes"]
                 
@@ -479,11 +515,13 @@ class APIClient:
                 at_civs = target_meta['numberOfCivilians']
                 at_favorited = target_meta['favorite']
                 at_landfield_id = target["id"]
+                at_landfield_description = target_attrs["description"]
                 at_tile_count = target_attrs["tileCount"]
+                at_landfield_tier = target_attrs['landfieldTier']
 
                 print(
-                    f"\t<< Processing A.T. {at_landfield_id}: "
-                    f"[ TIER: {target_attrs['tileClass']}"
+                    f"\t<< Processing A.T. {at_landfield_id} | {at_landfield_description}: "
+                    f"[ TIER: {at_landfield_tier}"
                     f" | TILES: {at_tile_count}"
                     f" | CIVS: {at_civs}"
                     f" | DROIDS: {at_droids}"
@@ -494,15 +532,27 @@ class APIClient:
                     print("\t\t<< Breaker threshold reached >>")
                     return
 
-                if at_droids == 0 and at_civs == 0 and at_favorited is None:
-                    favorite_payload = await self.toggle_favorite(at_landfield_id)
-                    print(f"\t\t|| Favorite Added || {favorite_payload}")
+                if at_landfield_tier == 1 and at_droids == 0 and at_civs == 0 and at_favorited is None:
+                    print("DEBUG")
+                    print(at_favorited)
+                    print(at_favorited is None)
+                    print(at_favorited)
+                    #bulk upsert deprecates need to toggle props
+                    #favorite_payload = await self.toggle_favorite(at_landfield_id)
+                    print(f"\t\t|| Favorite Added >> {at_landfield_id} | {at_landfield_description}")
+                    self.favorite_landfields.append(at_landfield_id)
                     await self.wait_helper(level=2)
 
             if i + 1 <= total_at_pages:
                 print(f"\t++ A.T. Page Flip to Page {i + 1} ++")
                 payload = await self.get_attack_targets(property_id, i + 1, droids_url_str)
                 await self.wait_helper(level=1)
+        
+        # Perform bulk upsert only if we have favorites to process
+        if len(self.favorite_landfields) > 0:
+            print(f"\t<< Performing bulk upsert for {len(self.favorite_landfields)} landfields >>")
+            await self.bulk_upsert_favorites()
+            self.favorite_landfields = []  # Clear the list after upserting
 
     async def run(self):
         """
@@ -523,6 +573,7 @@ class APIClient:
             - Implements wait periods between operations
         """
         payload = await self.get_landfield(1)
+
         await self.wait_helper()
         
         total_pages = payload['meta']['pages']
