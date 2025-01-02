@@ -502,12 +502,13 @@ class APIClient:
         droids_url_str = "&withinRangeDroidIds[]=".join(droid_ids)
         droids_url_str = "withinRangeDroidIds[]=" + droids_url_str
 
-        payload = await self.get_attack_targets(property_id, 1, droids_url_str)
+        # Get initial payload and total pages
+        initial_payload = await self.get_attack_targets(property_id, 1, droids_url_str)
         await self.wait_helper()
-        total_at_pages = payload["meta"]["pages"]
+        total_at_pages = initial_payload["meta"]["pages"]
 
-        for i in range(1, total_at_pages + 1):
-            for target in payload['data']:       
+        async def process_single_page(page_payload):
+            for target in page_payload['data']:
                 target_meta = target['meta']
                 target_attrs = target["attributes"]
                 
@@ -530,27 +531,33 @@ class APIClient:
 
                 if at_tile_count < self.config.tile_breaker_count:
                     print("\t\t<< Breaker threshold reached >>")
-                    return
+                    return False
 
                 if at_landfield_tier == 1 and at_droids == 0 and at_civs == 0 and at_favorited is None:
-                    #bulk upsert deprecates need to toggle props
-                    #favorite_payload = await self.toggle_favorite(at_landfield_id)
                     print(f"\t\t|| Favorite Added >> {at_landfield_id} | {at_landfield_description}")
                     self.favorite_landfields.append(at_landfield_id)
-                    #await self.wait_helper(level=2)
 
-            if i + 1 <= total_at_pages:
-                print(f"\t++ A.T. Page Flip to Page {i + 1} ++")
-                payload = await self.get_attack_targets(property_id, i + 1, droids_url_str)
+            return True
+
+        # Process all pages
+        for page_num in range(1, total_at_pages + 1):
+            current_payload = initial_payload if page_num == 1 else await self.get_attack_targets(property_id, page_num, droids_url_str)
+            
+            if page_num > 1:
+                print(f"\t++ A.T. Page Flip to Page {page_num} ++")
                 await self.wait_helper(level=1)
-        
-        # Perform bulk upsert only if we have favorites to process
-        if len(self.favorite_landfields) > 0:
-            print(f"\t<< Performing bulk upsert for {len(self.favorite_landfields)} landfields >>")
+            
+            if not await process_single_page(current_payload):
+                break
+
+        # Handle bulk upsert
+        if self.favorite_landfields:
+            print(f"<< Performing bulk upsert for {len(self.favorite_landfields)} landfields >>")
             await self.bulk_upsert_favorites()
-            self.favorite_landfields = []  # Clear the list after upserting
+            await self.wait_helper(level=2)
+            self.favorite_landfields = []
         else:
-            print(f"\t<< Skipping bulk upsert for {property_id} | {property_description} as favorite candidates were found >>")
+            print(f"<< Skipping bulk upsert for {property_id} | {property_description} as no favorite candidates were found >>")
 
     async def run(self):
         """
