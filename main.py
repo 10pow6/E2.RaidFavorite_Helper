@@ -533,10 +533,6 @@ class APIClient:
                     return
 
                 if at_landfield_tier == 1 and at_droids == 0 and at_civs == 0 and at_favorited is None:
-                    print("DEBUG")
-                    print(at_favorited)
-                    print(at_favorited is None)
-                    print(at_favorited)
                     #bulk upsert deprecates need to toggle props
                     #favorite_payload = await self.toggle_favorite(at_landfield_id)
                     print(f"\t\t|| Favorite Added >> {at_landfield_id} | {at_landfield_description}")
