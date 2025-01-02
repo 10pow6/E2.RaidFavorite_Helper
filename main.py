@@ -559,12 +559,15 @@ class APIClient:
         else:
             print(f"<< Skipping bulk upsert for {property_id} | {property_description} as no favorite candidates were found >>")
 
-    async def run(self):
+    async def run(self, start_page=1):
         """
         Main execution loop for the API client.
 
+        Args:
+            start_page (int): The page number to start processing from (default: 1)
+
         This method orchestrates the entire API interaction process:
-        1. Fetches initial landfield data
+        1. Fetches initial landfield data from the specified start page
         2. Processes each page of results
         3. Handles property processing for each item
         4. Manages API call counting and rate limiting
@@ -577,14 +580,20 @@ class APIClient:
             - Maintains last processed page number for recovery
             - Implements wait periods between operations
         """
-        payload = await self.get_landfield(1)
+        # Validate start_page
+        if start_page < 1:
+            raise ValueError("start_page must be greater than or equal to 1")
 
+        # Initialize with the specified start page
+        payload = await self.get_landfield(start_page)
         await self.wait_helper()
         
         total_pages = payload['meta']['pages']
         print(f"<< Total Raid Property Pages: {total_pages} >>")
+        print(f"<< Starting from page: {start_page} >>")
         
-        for i in range(1, total_pages + 1):
+        # Adjust the range to start from the specified page
+        for i in range(start_page, total_pages + 1):
             for property in payload['data']:
                 await self.process_property(property)
             
